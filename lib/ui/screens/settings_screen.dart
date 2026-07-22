@@ -1,0 +1,350 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/providers/app_state.dart';
+import '../../core/models/app_models.dart';
+import '../../core/services/download_manager.dart';
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings & Models')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text('Active Architecture', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          // ignore: deprecated_member_use
+          RadioListTile<PipelineType>(
+            title: const Text('True Multimodal (Audio-in LLM)'),
+            subtitle: const Text('Requires base model + mmproj'),
+            value: PipelineType.trueMultimodal,
+            groupValue: state.activePipeline,
+            onChanged: (v) => state.setActivePipeline(v!),
+          ),
+          // ignore: deprecated_member_use
+          RadioListTile<PipelineType>(
+            title: const Text('STT + Text LLM Pipeline'),
+            subtitle: const Text('Requires Whisper model + base model'),
+            value: PipelineType.sttPipeline,
+            groupValue: state.activePipeline,
+            onChanged: (v) => state.setActivePipeline(v!),
+          ),
+          
+          const Divider(),
+          const Text('Downloads Management', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          const Text('Text SLMs', style: TextStyle(fontWeight: FontWeight.bold)),
+          _PresetDownloader(
+            name: 'Phi-3 Mini (Text LLM)',
+            url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+            filename: 'phi-3-mini-q4.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('phi-3-mini-q4.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Gemma 2 2B IT (Text LLM)',
+            url: 'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf',
+            filename: 'gemma-2-2b-it-Q4_K_M.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('gemma-2-2b-it-Q4_K_M.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Qwen 2.5 1.5B Instruct (Text LLM)',
+            url: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+            filename: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('qwen2.5-1.5b-instruct-q4_k_m.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'TinyLlama 1.1B Chat (Text LLM)',
+            url: 'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
+            filename: 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'DeepSeek R1 Distill 1.5B (Text LLM)',
+            url: 'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf',
+            filename: 'deepseek-r1-distill-qwen-1.5b-q4.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('deepseek-r1-distill-qwen-1.5b-q4.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          const SizedBox(height: 8),
+          const Text('Multimodal SLMs (Requires Projector)', style: TextStyle(fontWeight: FontWeight.bold)),
+          _PresetDownloader(
+            name: 'LLaVA 1.5 7B (Base GGUF)',
+            url: 'https://huggingface.co/mys/ggml_llava-v1.5-7b/resolve/main/ggml-model-q4_k.gguf',
+            filename: 'llava-v1.5-7b-q4.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('llava-v1.5-7b-q4.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'LLaVA 1.5 Projector (mmproj)',
+            url: 'https://huggingface.co/mys/ggml_llava-v1.5-7b/resolve/main/mmproj-model-f16.gguf',
+            filename: 'llava-mmproj-f16.gguf',
+            isSelected: state.selectedProjectorPath?.endsWith('llava-mmproj-f16.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(projectorPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Moondream 2 Base (Multimodal LLM)',
+            url: 'https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-text-model-f16.gguf',
+            filename: 'moondream2-text-model-f16.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('moondream2-text-model-f16.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Moondream 2 Projector (mmproj)',
+            url: 'https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-mmproj-f16.gguf',
+            filename: 'moondream2-mmproj-f16.gguf',
+            isSelected: state.selectedProjectorPath?.endsWith('moondream2-mmproj-f16.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(projectorPath: path),
+          ),
+          const SizedBox(height: 8),
+          const Text('Speech-To-Text Models (Multilingual/Spanish)', style: TextStyle(fontWeight: FontWeight.bold)),
+          _PresetDownloader(
+            name: 'Whisper Tiny (Multi)',
+            url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin',
+            filename: 'ggml-tiny.bin',
+            isSelected: state.selectedSttPath?.endsWith('ggml-tiny.bin') ?? false,
+            onDownloaded: (path) => state.setModelPaths(sttPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Whisper Base (Multi)',
+            url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin',
+            filename: 'ggml-base.bin',
+            isSelected: state.selectedSttPath?.endsWith('ggml-base.bin') ?? false,
+            onDownloaded: (path) => state.setModelPaths(sttPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Whisper Small (Multi)',
+            url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
+            filename: 'ggml-small.bin',
+            isSelected: state.selectedSttPath?.endsWith('ggml-small.bin') ?? false,
+            onDownloaded: (path) => state.setModelPaths(sttPath: path),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            decoration: InputDecoration(
+              labelText: 'Base LLM Path (.gguf)',
+              border: const OutlineInputBorder(),
+              hintText: state.selectedLlmPath ?? 'Not set',
+            ),
+            onChanged: (v) => state.setModelPaths(llmPath: v),
+          ),
+          const SizedBox(height: 8),
+          if (state.activePipeline == PipelineType.trueMultimodal)
+            TextField(
+              decoration: InputDecoration(
+                labelText: 'Projector Path (.mmproj)',
+                border: const OutlineInputBorder(),
+                hintText: state.selectedProjectorPath ?? 'Not set',
+              ),
+              onChanged: (v) => state.setModelPaths(projectorPath: v),
+            ),
+          if (state.activePipeline == PipelineType.sttPipeline)
+            TextField(
+              decoration: InputDecoration(
+                labelText: 'Whisper Model Path (.bin)',
+                border: const OutlineInputBorder(),
+                hintText: state.selectedSttPath ?? 'Not set',
+              ),
+              onChanged: (v) => state.setModelPaths(sttPath: v),
+            ),
+            
+          const SizedBox(height: 24),
+          const Divider(),
+          ElevatedButton(
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Model Download Manager UI (Custom URLs) To be implemented')));
+            },
+            child: const Text('Open Custom Downloads'),
+          ),
+          const Divider(),
+          const Text('Performance Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          const Text('GPU Layers', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('Increase to offload to GPU. If the app crashes on large models, lower this value.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          Slider(
+            value: state.gpuLayers.toDouble(),
+            min: 0,
+            max: 99,
+            divisions: 99,
+            label: state.gpuLayers.toString(),
+            onChanged: (value) {
+              state.setModelPaths(gpuLayers: value.toInt());
+            },
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              onPressed: state.isInitializingPipeline ? null : () async {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Loading Pipeline... Please wait.')));
+              await state.loadPipeline();
+              if (context.mounted) {
+                if (state.isPipelineLoaded) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pipeline Loaded Into Memory!')));
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load pipeline: ${state.pipelineError ?? "Unknown error"}')));
+                }
+              }
+            },
+            child: state.isInitializingPipeline 
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : const Text('Load Pipeline into Memory'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PresetDownloader extends StatefulWidget {
+  final String name;
+  final String url;
+  final String filename;
+  final bool isSelected;
+  final Function(String) onDownloaded;
+
+  const _PresetDownloader({
+    required this.name,
+    required this.url,
+    required this.filename,
+    this.isSelected = false,
+    required this.onDownloaded,
+  });
+
+  @override
+  State<_PresetDownloader> createState() => _PresetDownloaderState();
+}
+
+class _PresetDownloaderState extends State<_PresetDownloader> {
+  double _progress = 0;
+  bool _isDownloading = false;
+  bool _isDownloaded = false;
+  String? _downloadedPath;
+  
+  int _receivedBytes = 0;
+  int _totalBytes = 0;
+  double _speedMBps = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkIfDownloaded();
+  }
+
+  void _checkIfDownloaded() async {
+    final manager = DownloadManager();
+    final modelsDirPath = await manager.getModelsDirectory();
+    final file = File('$modelsDirPath/${widget.filename}');
+    if (await file.exists()) {
+      if (mounted) {
+        setState(() {
+          _isDownloaded = true;
+          _progress = 1.0;
+          _downloadedPath = file.path;
+        });
+      }
+    }
+  }
+
+  void _startDownload() async {
+    setState(() {
+      _isDownloading = true;
+    });
+    
+    final manager = DownloadManager();
+    final path = await manager.downloadModel(
+      widget.url,
+      widget.filename,
+      (progress, received, total, speed) {
+        if (mounted) {
+          setState(() {
+            _progress = progress;
+            _receivedBytes = received;
+            _totalBytes = total;
+            _speedMBps = speed;
+          });
+        }
+      },
+    );
+
+    if (path != null) {
+      setState(() {
+        _isDownloading = false;
+        _isDownloaded = true;
+        _progress = 1.0;
+        _downloadedPath = path;
+      });
+      widget.onDownloaded(path);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${widget.name} selected!')));
+      }
+    } else {
+      setState(() {
+        _isDownloading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String formatBytes(int bytes) {
+      if (bytes == 0) return '0 B';
+      final double mb = bytes / (1024 * 1024);
+      return '${mb.toStringAsFixed(1)} MB';
+    }
+
+    Widget subtitle;
+    if (_isDownloading) {
+      subtitle = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LinearProgressIndicator(value: _progress),
+          const SizedBox(height: 4),
+          Text(
+            '${(_progress * 100).toStringAsFixed(1)}% - ${formatBytes(_receivedBytes)} / ${formatBytes(_totalBytes)} @ ${_speedMBps.toStringAsFixed(2)} MB/s',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ],
+      );
+    } else {
+      subtitle = Text(_isDownloaded ? 'Downloaded' : 'Not downloaded');
+    }
+
+    return Card(
+      child: ListTile(
+        title: Text(widget.name),
+        subtitle: subtitle,
+        trailing: _isDownloaded
+            ? (widget.isSelected 
+                ? const Icon(Icons.radio_button_checked, color: Colors.green)
+                : IconButton(
+                    icon: const Icon(Icons.radio_button_unchecked, color: Colors.grey),
+                    onPressed: () {
+                      if (_downloadedPath != null) {
+                        widget.onDownloaded(_downloadedPath!);
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${widget.name} selected!')));
+                      }
+                    },
+                  ))
+            : IconButton(
+                icon: const Icon(Icons.download),
+                onPressed: _isDownloading ? null : _startDownload,
+              ),
+      ),
+    );
+  }
+}
