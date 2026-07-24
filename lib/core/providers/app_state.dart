@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/app_models.dart';
+import '../services/download_manager.dart';
 import '../../pipelines/base_pipeline.dart';
 import '../../pipelines/true_multimodal_pipeline.dart';
 import '../../pipelines/stt_text_pipeline.dart';
+import '../services/hardware_profiler.dart';
 
 class AppState extends ChangeNotifier {
   PipelineType _activePipeline = PipelineType.sttPipeline;
@@ -22,6 +26,18 @@ class AppState extends ChangeNotifier {
   bool _isPipelineLoaded = false;
   String? _pipelineError;
   
+  bool _needsModelDownload = false;
+  bool get needsModelDownload => _needsModelDownload;
+  
+  bool _isDownloading = false;
+  bool get isDownloading => _isDownloading;
+  
+  double _downloadProgress = 0.0;
+  double get downloadProgress => _downloadProgress;
+  
+  String _downloadStatus = '';
+  String get downloadStatus => _downloadStatus;
+  
   BasePipeline? _activePipelineInstance;
 
   Map<String, ModelStats> _modelStats = {};
@@ -29,6 +45,148 @@ class AppState extends ChangeNotifier {
 
   AppState() {
     loadStats();
+    autoInitialize();
+  }
+
+  bool _isPrewarming = false;
+  bool get isPrewarming => _isPrewarming;
+
+  Future<void> autoInitialize() async {
+    final models = await getAvailableModels();
+    final dir = await getApplicationDocumentsDirectory();
+    final prefsFile = File('${dir.path}/selected_models.json');
+    
+    String? llm;
+    String? stt;
+    String? projector;
+    
+    // Check if the user previously saved a specific model preference
+    if (prefsFile.existsSync()) {
+      try {
+        final data = jsonDecode(prefsFile.readAsStringSync());
+        llm = data['llm'];
+        stt = data['stt'];
+        projector = data['projector'];
+        
+        // Verify they still exist on disk
+        if (llm != null && !File(llm).existsSync()) llm = null;
+        if (stt != null && !File(stt).existsSync()) stt = null;
+        if (projector != null && !File(projector).existsSync()) projector = null;
+      } catch (_) {}
+    }
+    
+    // If no preference saved, determine the expected default LLM based on hardware
+    if (llm == null || llm.isEmpty) {
+      final ramMb = HardwareSpecs.getDeviceRamMB();
+      final expectedLlmPrefix = (ramMb > 10000) ? 'qwen2.5-3b-instruct' : 'qwen2.5-1.5b-instruct';
+      llm = models['llms']?.firstWhere((m) => m.toLowerCase().contains(expectedLlmPrefix), orElse: () => '');
+    }
+    
+    if (stt == null || stt.isEmpty) {
+      final ramMb = HardwareSpecs.getDeviceRamMB();
+      final expectedSttPrefix = (ramMb > 10000) ? 'ggml-small.bin' : 'ggml-base.bin';
+      stt = models['stt']?.firstWhere((m) => m.toLowerCase().contains(expectedSttPrefix), orElse: () => '');
+    }
+    
+    if (llm != null && llm.isNotEmpty && stt != null && stt.isNotEmpty) {
+      _needsModelDownload = false;
+      _selectedLlmPath = llm;
+      _selectedSttPath = stt;
+      _activePipeline = PipelineType.sttPipeline;
+      
+      await loadPipeline();
+    } else {
+      _needsModelDownload = true;
+    }
+    notifyListeners();
+  }
+
+  final _downloadManager = DownloadManager();
+
+  void cancelDownloads() {
+    _isDownloading = false;
+    _needsModelDownload = false;
+    _downloadManager.cancel();
+    notifyListeners();
+  }
+
+  Future<void> downloadDefaultModels() async {
+    _isDownloading = true;
+    _needsModelDownload = false;
+    _downloadProgress = 0.0;
+    _downloadStatus = 'Initializing download...';
+    notifyListeners();
+
+    try {
+      final ramMb = HardwareSpecs.getDeviceRamMB();
+      String qwenUrl;
+      String qwenFilename;
+      String qwenName;
+      String whisperUrl;
+      String whisperFilename;
+      String whisperName;
+
+      if (ramMb > 10000) {
+        // High-end device (e.g. 12GB RAM)
+        qwenUrl = 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf';
+        qwenFilename = 'qwen2.5-3b-instruct-q4_k_m.gguf';
+        qwenName = 'Qwen 2.5 3B (~2.1 GB)';
+        whisperUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin';
+        whisperFilename = 'ggml-small.bin';
+        whisperName = 'Whisper Small (~480 MB)';
+      } else {
+        // Mid-range & Low-end devices
+        qwenUrl = 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf';
+        qwenFilename = 'qwen2.5-1.5b-instruct-q4_k_m.gguf';
+        qwenName = 'Qwen 2.5 1.5B (~1.12 GB)';
+        whisperUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin';
+        whisperFilename = 'ggml-base.bin';
+        whisperName = 'Whisper Base (~142 MB)';
+      }
+      
+      _downloadStatus = 'Downloading $qwenName...';
+      notifyListeners();
+
+      final qwenPath = await _downloadManager.downloadModel(
+        qwenUrl,
+        qwenFilename,
+        (progress, received, total, speed) {
+          if (_isDownloading) {
+            _downloadProgress = progress * 0.85;
+            notifyListeners();
+          }
+        },
+      );
+
+      if (qwenPath == null || !_isDownloading) return;
+      
+      _downloadStatus = 'Downloading $whisperName...';
+      notifyListeners();
+
+      final whisperPath = await _downloadManager.downloadModel(
+        whisperUrl,
+        whisperFilename,
+        (progress, received, total, speed) {
+          if (_isDownloading) {
+            _downloadProgress = 0.85 + (progress * 0.15);
+            notifyListeners();
+          }
+        },
+      );
+
+      if (whisperPath == null || !_isDownloading) return;
+
+      _downloadStatus = 'Download complete!';
+      _isDownloading = false;
+      notifyListeners();
+      
+      await autoInitialize();
+    } catch (e) {
+      _downloadStatus = 'Error downloading models: $e';
+      _isDownloading = false;
+      _needsModelDownload = true;
+      notifyListeners();
+    }
   }
 
   Future<void> loadStats() async {
@@ -137,6 +295,27 @@ class AppState extends ChangeNotifier {
       debugPrint('APPSTATE: init finished successfully.');
       _isPipelineLoaded = true;
       _pipelineError = null;
+      
+      // Pre-warm the system prompt
+      if (_activePipelineInstance != null) {
+        debugPrint('Starting background pre-warm of KV cache...');
+        _isPrewarming = true;
+        notifyListeners();
+        _activePipelineInstance!.processText(
+          [ChatMessage(id: 'warmup', text: 'hello', isUser: true, timestamp: DateTime.now())],
+          systemContext: getStaticSystemPrompt(),
+          dynamicContext: getDynamicContext(),
+          onMetrics: (_) {},
+        ).listen((_) {}, onError: (e) {
+          debugPrint('Pre-warm error (ignoring): $e');
+          _isPrewarming = false;
+          notifyListeners();
+        }).onDone(() {
+          debugPrint('Pre-warm complete! KV Cache is ready.');
+          _isPrewarming = false;
+          notifyListeners();
+        });
+      }
     } catch (e) {
       debugPrint('APPSTATE: Caught error: $e');
       _isPipelineLoaded = false;
@@ -159,6 +338,21 @@ class AppState extends ChangeNotifier {
     if (sttPath != null) _selectedSttPath = sttPath;
     if (gpuLayers != null) _gpuLayers = gpuLayers;
     notifyListeners();
+    _saveModelPreferences();
+  }
+  
+  Future<void> _saveModelPreferences() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/selected_models.json');
+      await file.writeAsString(jsonEncode({
+        'llm': _selectedLlmPath,
+        'stt': _selectedSttPath,
+        'projector': _selectedProjectorPath,
+      }));
+    } catch (e) {
+      debugPrint('Failed to save model preferences: $e');
+    }
   }
 
   Future<Map<String, List<String>>> getAvailableModels() async {
@@ -251,44 +445,72 @@ class AppState extends ChangeNotifier {
   }
 
   void parseMessageForTransaction(String message) {
-    final regex = RegExp(r'\[SAVE:\s*([-\d\.]+),\s*([^\]]+)\]');
-    final match = regex.firstMatch(message);
-    if (match != null) {
-      final amountStr = match.group(1);
-      final desc = match.group(2)?.trim();
-      if (amountStr != null && desc != null) {
-        final amount = double.tryParse(amountStr);
-        if (amount != null) {
-          _transactions.add(Transaction(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            amount: amount,
-            description: desc,
-            timestamp: DateTime.now(),
-          ));
-          notifyListeners();
+    final regexIncome = RegExp(r'\[INCOME:\s*([-\d\.,]+),\s*([^\]]+)\]');
+    final matchIncome = regexIncome.firstMatch(message);
+    if (matchIncome != null) {
+      _saveTransaction(matchIncome, isIncome: true);
+      return;
+    }
+    
+    final regexExpense = RegExp(r'\[EXPENSE:\s*([-\d\.,]+),\s*([^\]]+)\]');
+    final matchExpense = regexExpense.firstMatch(message);
+    if (matchExpense != null) {
+      _saveTransaction(matchExpense, isIncome: false);
+    }
+  }
+
+  void _saveTransaction(RegExpMatch match, {required bool isIncome}) {
+    final amountStr = match.group(1);
+    final desc = match.group(2)?.trim();
+    if (amountStr != null && desc != null) {
+      final cleanAmountStr = amountStr.replaceAll(',', '');
+      double? amount = double.tryParse(cleanAmountStr);
+      if (amount != null) {
+        amount = amount.abs();
+        if (!isIncome) {
+          amount = -amount;
         }
+        _transactions.add(Transaction(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          amount: amount,
+          description: desc,
+          timestamp: DateTime.now(),
+        ));
+        notifyListeners();
       }
     }
   }
 
-  String getTransactionHistoryContext() {
+  String getStaticSystemPrompt() {
     final buffer = StringBuffer();
-    buffer.writeln('You are a helpful financial assistant. Your job is to help the user track their expenses and income.');
-    buffer.writeln('When the user mentions a new transaction (income or expense), you MUST include the exact syntax `[SAVE: amount, description]` in your response to save it to the database.');
-    buffer.writeln('Use positive numbers for income, and negative numbers for expenses. For example, if the user bought a coffee for \$5, you should write: `[SAVE: -5, Coffee]`. If the user sold a bike for \$230, write: `[SAVE: 230, Sold bike]`.');
-    buffer.writeln('IMPORTANT: Keep the `description` in the exact SAME language the user speaks. Do NOT translate it to English. If the user speaks Spanish, write the description in Spanish.');
-    buffer.writeln('CRITICAL: If the user mentions a transaction but DOES NOT provide the price or amount, DO NOT output any tag! Instead, ask the user how much it cost or how much they earned.');
-    buffer.writeln('CRITICAL: The tag must ALWAYS be [SAVE: amount, description]. NEVER change the word SAVE. Never use [VENDÍ] or [COMPRÉ].');
+    buffer.writeln('You are a finance assistant that tracks expenses and income. You must follow these strict rules:');
+    buffer.writeln('1. If the user describes a transaction with both an amount and an item, you MUST output EXACTLY: `[EXPENSE: amount, item]` or `[INCOME: amount, item]`.');
+    buffer.writeln('2. If the user mentions an amount but no item, ask what they spent it on.');
+    buffer.writeln('3. If the user mentions an item but no amount, ask how much it was.');
+    buffer.writeln('4. If the user says a greeting, chats normally, or says something completely unrelated to finance, DO NOT output a tag. Just reply conversationally in a short sentence.');
+    buffer.writeln('');
     buffer.writeln('EXAMPLES:');
-    buffer.writeln('User: Compré una manzana por 2 dolares. -> Assistant: [SAVE: -2, Manzana]');
-    buffer.writeln('User: Vendí mi teclado en 40. -> Assistant: [SAVE: 40, Teclado]');
-    buffer.writeln('User: I bought tomatoes. -> Assistant: How much did the tomatoes cost? (DO NOT output a SAVE tag here)');
-    buffer.writeln('User: Vendí tomates. -> Assistant: ¿A cuánto los vendiste? (DO NOT output a SAVE tag here)');
-    buffer.writeln('User: hello -> Assistant: Hello! How can I help you? (DO NOT output a SAVE tag here)');
-    buffer.writeln();
-    buffer.writeln('CRITICAL CONSTRAINT: You are running on a mobile phone with limited resources. You MUST keep your conversational responses extremely brief, short, and to the point. Never generate long paragraphs.');
-    buffer.writeln();
-    
+    buffer.writeln('User: Gasté 50 en comida');
+    buffer.writeln('Assistant: [EXPENSE: 50, Comida]');
+    buffer.writeln('User: Vendí mi bici por 200');
+    buffer.writeln('Assistant: [INCOME: 200, Bici]');
+    buffer.writeln('User: compré tomates');
+    buffer.writeln('Assistant: ¿Cuánto te costaron los tomates?');
+    buffer.writeln('User: gasté 100');
+    buffer.writeln('Assistant: ¿En qué gastaste los 100?');
+    buffer.writeln('User: hola');
+    buffer.writeln('Assistant: ¡Hola! ¿En qué te puedo ayudar?');
+    buffer.writeln('User: nicki nicole');
+    buffer.writeln('Assistant: No sé qué tiene que ver eso con tus finanzas. ¿Registramos algún gasto?');
+    buffer.writeln('User: lero lero');
+    buffer.writeln('Assistant: Por favor dime si quieres registrar algún ingreso o gasto.');
+    buffer.writeln('');
+    buffer.writeln('CRITICAL: Keep your responses extremely short. You are on a mobile phone.');
+    return buffer.toString();
+  }
+
+  String getDynamicContext() {
+    final buffer = StringBuffer();
     if (_transactions.isEmpty) {
       buffer.writeln('No previous transactions yet.');
     } else {

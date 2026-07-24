@@ -5,6 +5,12 @@ import 'package:path_provider/path_provider.dart';
 
 class DownloadManager {
   final Dio _dio = Dio();
+  CancelToken? _cancelToken;
+
+  void cancel() {
+    _cancelToken?.cancel('Cancelled by user');
+    _cancelToken = null;
+  }
 
   Future<String> getModelsDirectory() async {
     final dir = await getApplicationDocumentsDirectory();
@@ -44,8 +50,10 @@ class DownloadManager {
          return filePath;
       }
 
+      _cancelToken = CancelToken();
       final response = await _dio.get<ResponseBody>(
         url,
+        cancelToken: _cancelToken,
         options: Options(
           responseType: ResponseType.stream,
           headers: downloadedBytes > 0 ? {'range': 'bytes=$downloadedBytes-'} : null,

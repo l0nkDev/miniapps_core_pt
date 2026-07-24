@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 class HardwareProfiler {
   bool _isTracking = false;
@@ -15,22 +16,18 @@ class HardwareProfiler {
   void startTracking() {
     _isTracking = true;
     _peakCpu = 0.0;
-    _peakRamMb = 0.0;
+    _peakRamMb = ProcessInfo.currentRss / (1024 * 1024);
     
-    // In a real implementation across platforms, you'd use platform channels
-    // or package specific logic. For now, we'll poll the perf monitor.
     _timer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       if (!_isTracking) {
         timer.cancel();
         return;
       }
       
-      try {
-        // Pseudo logic assuming flutter_perf_monitor has methods or we can use native bridging
-        // As a fallback placeholder for benchmarking, we just record standard timings.
-        // The real package might stream data to its own widget. 
-        // For actual peak usage, you'd integrate natively per platform.
-      } catch (_) {}
+      final currentRam = ProcessInfo.currentRss / (1024 * 1024);
+      if (currentRam > _peakRamMb) {
+        _peakRamMb = currentRam;
+      }
     });
   }
 
@@ -39,7 +36,22 @@ class HardwareProfiler {
     _timer?.cancel();
     return {
       'peakCpu': _peakCpu,
-      'peakRamMb': _peakRamMb,
+      'peakRamMb': double.parse(_peakRamMb.toStringAsFixed(1)),
     };
+  }
+}
+
+class HardwareSpecs {
+  static int getDeviceRamMB() {
+    if (Platform.isAndroid || Platform.isLinux) {
+      try {
+        final meminfo = File('/proc/meminfo').readAsStringSync();
+        final match = RegExp(r'MemTotal:\s+(\d+)\s+kB').firstMatch(meminfo);
+        if (match != null) {
+          return int.parse(match.group(1)!) ~/ 1024;
+        }
+      } catch (_) {}
+    }
+    return 4096; // Fallback to 4GB if unknown
   }
 }

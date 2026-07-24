@@ -280,32 +280,50 @@ class _ChatScreenState extends State<ChatScreen> {
       currentMetrics = m;
     }
 
-    final systemContext = state.getTransactionHistoryContext();
+    final systemContext = state.getStaticSystemPrompt();
+    final dynamicContext = state.getDynamicContext();
     Stream<String> stream;
+    
+    final userMessageId = _uuid.v4();
+    if (audioPath != null) {
+      state.addMessage(ChatMessage(id: userMessageId, text: '🎙️ Transcribing...', isUser: true, timestamp: DateTime.now()));
+    }
+
     if (audioPath != null) {
       stream = state.activePipelineInstance!.processAudio(
         audioPath,
         [...state.messages],
         systemContext: systemContext,
+        dynamicContext: dynamicContext,
         onMetrics: onMetrics,
+        onTranscribed: (text) {
+          state.updateMessage(userMessageId, '🎙️ $text');
+          state.addMessage(
+            ChatMessage(
+              id: responseId,
+              text: 'Thinking...',
+              isUser: false,
+              timestamp: DateTime.now(),
+            ),
+          );
+        }
       );
     } else {
       stream = state.activePipelineInstance!.processText(
         [...state.messages],
         systemContext: systemContext,
+        dynamicContext: dynamicContext,
         onMetrics: onMetrics,
       );
+      state.addMessage(
+        ChatMessage(
+          id: responseId,
+          text: 'Thinking...',
+          isUser: false,
+          timestamp: DateTime.now(),
+        ),
+      );
     }
-
-    // Create an initial message bubble right away so the user sees it's working
-    state.addMessage(
-      ChatMessage(
-        id: responseId,
-        text: 'Thinking...',
-        isUser: false,
-        timestamp: DateTime.now(),
-      ),
-    );
 
     stream.listen(
       (chunk) {
@@ -406,10 +424,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.swap_calls),
-            onPressed: state.isProcessing ? null : _showModelSwapPopup,
-          ),
-          IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () {
               context.read<AppState>().clearMessages();
@@ -424,96 +438,189 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.pushNamed(context, '/settings'),
+            onPressed: () {
+              context.read<AppState>().cancelDownloads();
+              Navigator.pushNamed(context, '/settings');
+            },
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          const MetricsPanel(),
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              itemCount: state.messages.length,
-              itemBuilder: (context, index) {
-                final msg = state.messages[index];
-                return Align(
-                  alignment: msg.isUser
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: msg.isUser ? Colors.blue[100] : Colors.grey[200],
-                      borderRadius: BorderRadius.circular(12),
+          Column(
+            children: [
+              const MetricsPanel(),
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: state.messages.length,
+                  itemBuilder: (context, index) {
+                    final msg = state.messages[index];
+                    return Align(
+                      alignment: msg.isUser
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: msg.isUser ? Colors.blue[100] : Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Builder(builder: (context) {
+                              final text = msg.text;
+                              final match = RegExp(r'\[(INCOME|EXPENSE):\s*([-\d\.,]+),\s*([^\]]+)\]').firstMatch(text);
+                              if (match != null && !msg.isUser) {
+                                final isIncome = match.group(1) == 'INCOME';
+                                final amount = match.group(2)!;
+                                final desc = match.group(3)!;
+                                final cleanText = text.replaceAll(match.group(0)!, '').trim();
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (cleanText.isNotEmpty) ...[
+                                      Text(cleanText),
+                                      const SizedBox(height: 8),
+                                    ],
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: isIncome ? Colors.green[50] : Colors.red[50],
+                                        border: Border.all(color: isIncome ? Colors.green : Colors.red, width: 1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isIncome ? Icons.arrow_upward : Icons.arrow_downward,
+                                            color: isIncome ? Colors.green : Colors.red,
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            '\$${amount} - $desc',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: isIncome ? Colors.green[800] : Colors.red[800],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }
+                              return Text(text);
+                            }),
+                            if (msg.metrics != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'TTFT: ${msg.metrics!.timeToFirstTokenMs}ms | Total: ${msg.metrics!.totalProcessingTimeMs}ms',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                'RAM: ${msg.metrics!.peakRamUsageMb}MB',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (state.isProcessing)
+                const Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: CircularProgressIndicator(),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(_isRecording ? Icons.stop_circle : Icons.mic),
+                      color: _isRecording ? Colors.red : null,
+                      onPressed: (state.isProcessing || state.isPrewarming) ? null : _toggleRecording,
                     ),
+                    Expanded(
+                      child: TextField(
+                        controller: _textController,
+                        decoration: InputDecoration(
+                          hintText: state.isPrewarming 
+                              ? 'Warming up AI engine...' 
+                              : (state.isPipelineLoaded
+                                  ? 'Type a message...'
+                                  : 'Load Pipeline first from settings...'),
+                          border: const OutlineInputBorder(),
+                        ),
+                        onSubmitted: (state.isProcessing || !state.isPipelineLoaded || state.isPrewarming)
+                            ? null
+                            : _sendMessage,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      onPressed: (state.isProcessing || !state.isPipelineLoaded || state.isPrewarming)
+                          ? null
+                          : () => _sendMessage(_textController.text),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (state.needsModelDownload || state.isDownloading)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Card(
+                  margin: const EdgeInsets.all(32),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(msg.text),
-                        if (msg.metrics != null) ...[
+                        const Text('Models Missing', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 16),
+                        if (state.isDownloading) ...[
+                          Text(state.downloadStatus, textAlign: TextAlign.center),
+                          const SizedBox(height: 16),
+                          LinearProgressIndicator(value: state.downloadProgress > 0 ? state.downloadProgress : null),
                           const SizedBox(height: 8),
-                          Text(
-                            'TTFT: ${msg.metrics!.timeToFirstTokenMs}ms | Total: ${msg.metrics!.totalProcessingTimeMs}ms',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
+                          Text('${(state.downloadProgress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12)),
+                        ] else ...[
+                          const Text('The default AI models (Qwen 2.5 1.5B & Whisper Small) were not found. Would you like to download them now (~1.6 GB)?', textAlign: TextAlign.center),
+                          const SizedBox(height: 24),
+                          ElevatedButton(
+                            onPressed: () => context.read<AppState>().downloadDefaultModels(),
+                            child: const Text('Download Defaults'),
                           ),
-                          Text(
-                            'CPU: ${msg.metrics!.peakCpuUsage}% | RAM: ${msg.metrics!.peakRamUsageMb}MB',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pushNamed(context, '/settings');
+                            },
+                            child: const Text('Select existing models from Settings'),
                           ),
                         ],
                       ],
                     ),
                   ),
-                );
-              },
-            ),
-          ),
-          if (state.isProcessing)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: CircularProgressIndicator(),
-            ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(_isRecording ? Icons.stop_circle : Icons.mic),
-                  color: _isRecording ? Colors.red : null,
-                  onPressed: state.isProcessing ? null : _toggleRecording,
                 ),
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    decoration: InputDecoration(
-                      hintText: state.isPipelineLoaded
-                          ? 'Type a message...'
-                          : 'Load Pipeline first from settings...',
-                      border: const OutlineInputBorder(),
-                    ),
-                    onSubmitted: (state.isProcessing || !state.isPipelineLoaded)
-                        ? null
-                        : _sendMessage,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: (state.isProcessing || !state.isPipelineLoaded)
-                      ? null
-                      : () => _sendMessage(_textController.text),
-                ),
-              ],
+              ),
             ),
-          ),
         ],
       ),
     );

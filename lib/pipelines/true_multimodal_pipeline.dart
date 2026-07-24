@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:lib_llama_cpp/lib_llama_cpp.dart';
 import 'package:lib_llama_cpp_platform_interface/lib_llama_cpp_platform_interface.dart';
 import '../core/models/app_models.dart';
+import '../core/services/hardware_profiler.dart';
 import 'base_pipeline.dart';
 
 class LocalLlamaCppPlatform extends LibLlamaCppPlatform {
@@ -45,7 +46,7 @@ class TrueMultimodalPipeline extends BasePipeline {
   }
 
   @override
-  Stream<String> processAudio(String audioPath, List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext}) async* {
+  Stream<String> processAudio(String audioPath, List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext, String? dynamicContext, void Function(String)? onTranscribed}) async* {
     if (!_isInitialized || _client == null) throw Exception('Pipeline not initialized');
     
     final startTime = DateTime.now();
@@ -54,19 +55,22 @@ class TrueMultimodalPipeline extends BasePipeline {
        ChatMessage(id: 'audio', text: 'Please process the audio at: $audioPath', isUser: true, timestamp: DateTime.now())
     );
     
-    yield* processText(newHistory, systemContext: systemContext, onMetrics: (metrics) {
+    yield* processText(newHistory, systemContext: systemContext, dynamicContext: dynamicContext, onMetrics: (metrics) {
        final totalTime = DateTime.now().difference(startTime).inMilliseconds;
        onMetrics(PipelineMetrics(
          timeToFirstTokenMs: metrics.timeToFirstTokenMs,
          totalProcessingTimeMs: totalTime,
          peakCpuUsage: metrics.peakCpuUsage,
          peakRamUsageMb: metrics.peakRamUsageMb,
+         tokensGenerated: metrics.tokensGenerated,
+         tokensPerSecond: metrics.tokensPerSecond,
+         promptTokensPerSecond: metrics.promptTokensPerSecond,
        ));
     });
   }
 
   @override
-  Stream<String> processText(List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext}) async* {
+  Stream<String> processText(List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext, String? dynamicContext}) async* {
     if (!_isInitialized || _client == null) throw Exception('Pipeline not initialized');
     
     final startTime = DateTime.now();
@@ -75,31 +79,46 @@ class TrueMultimodalPipeline extends BasePipeline {
       LlamaChatMessage(role: 'system', content: systemContext ?? 'You are a helpful assistant.'),
     ];
     
-    for (final msg in history) {
+    final recentHistory = history.length > 6 ? history.sublist(history.length - 6) : history;
+    for (int i = 0; i < recentHistory.length; i++) {
+      final msg = recentHistory[i];
       if (msg.text.trim().isEmpty) continue;
+      
+      if (i == recentHistory.length - 1 && dynamicContext != null && dynamicContext.isNotEmpty) {
+        messages.add(LlamaChatMessage(role: 'system', content: dynamicContext));
+      }
+      
       final role = msg.isUser ? 'user' : 'assistant';
       if (messages.last.role == role) {
-        // LlamaChatMessage has final fields, so we need to replace the last item
-        final oldContent = messages.last.content;
-        messages[messages.length - 1] = LlamaChatMessage(role: role, content: '$oldContent\n\n${msg.text}');
+        messages.last = LlamaChatMessage(role: role, content: '${messages.last.content}\n\n${msg.text}');
       } else {
         messages.add(LlamaChatMessage(role: role, content: msg.text));
       }
     }
     
     int timeToFirstTokenMs = 0;
+    double? tokensPerSecond;
     
+    final profiler = HardwareProfiler();
+    profiler.startTracking();
+
     try {
-      final result = await _client!.chat.completions.create(
+      final response = await _client!.chat.completions.create(
         model: 'multimodal',
         messages: messages,
       );
       
-      timeToFirstTokenMs = DateTime.now().difference(startTime).inMilliseconds;
+      final totalTimeMs = DateTime.now().difference(startTime).inMilliseconds;
+      timeToFirstTokenMs = totalTimeMs;
       
+      final result = response;
       if (result.choices.isNotEmpty) {
-         final content = result.choices.first.message.content;
-         yield content.toString();
+         final content = result.choices.first.message.content.toString();
+         final approximatedTokens = content.length ~/ 4;
+         if (totalTimeMs > 0) {
+            tokensPerSecond = approximatedTokens / (totalTimeMs / 1000.0);
+         }
+         yield content;
       } else {
          yield "Error: No response generated.";
       }
@@ -107,11 +126,14 @@ class TrueMultimodalPipeline extends BasePipeline {
       yield "Error during generation: $e";
     }
     
+    final hwMetrics = profiler.stopTracking();
+
     onMetrics(PipelineMetrics(
       timeToFirstTokenMs: timeToFirstTokenMs,
       totalProcessingTimeMs: DateTime.now().difference(startTime).inMilliseconds,
-      peakCpuUsage: 45.0,
-      peakRamUsageMb: 4100.0,
+      peakCpuUsage: hwMetrics['peakCpu'] ?? 0.0,
+      peakRamUsageMb: hwMetrics['peakRamMb'] ?? 0.0,
+      tokensPerSecond: tokensPerSecond,
     ));
   }
 

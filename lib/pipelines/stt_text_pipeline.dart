@@ -4,7 +4,9 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:lib_llama_cpp_server/lib_llama_cpp_server.dart';
 import 'package:whisper_ggml_plus/whisper_ggml_plus.dart';
+
 import '../core/models/app_models.dart';
+import '../core/services/hardware_profiler.dart';
 import 'base_pipeline.dart';
 
 class _ServerArgs {
@@ -94,12 +96,10 @@ class SttTextPipeline extends BasePipeline {
   }
 
   @override
-  Stream<String> processAudio(String audioPath, List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext}) async* {
-    if (!_isInitialized) throw Exception('Pipeline not initialized');
+  Stream<String> processAudio(String audioPath, List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext, String? dynamicContext, void Function(String)? onTranscribed}) async* {
+    if (!_isInitialized || _client == null) throw Exception('Pipeline not initialized');
     
     final startTime = DateTime.now();
-    
-    yield "Transcribing audio with Whisper...\n";
     
     final whisper = Whisper(model: WhisperModel.base);
     final transcribeResult = await whisper.transcribe(
@@ -111,25 +111,30 @@ class SttTextPipeline extends BasePipeline {
     );
     
     final text = transcribeResult.text;
-    yield "Transcribed: '$text'\n";
+    if (onTranscribed != null) {
+      onTranscribed(text);
+    }
     
     final newHistory = List<ChatMessage>.from(history)..add(
        ChatMessage(id: 'audio', text: text, isUser: true, timestamp: DateTime.now())
     );
     
-    yield* processText(newHistory, systemContext: systemContext, onMetrics: (metrics) {
+    yield* processText(newHistory, systemContext: systemContext, dynamicContext: dynamicContext, onMetrics: (metrics) {
        final totalTime = DateTime.now().difference(startTime).inMilliseconds;
        onMetrics(PipelineMetrics(
          timeToFirstTokenMs: metrics.timeToFirstTokenMs,
          totalProcessingTimeMs: totalTime,
          peakCpuUsage: metrics.peakCpuUsage,
          peakRamUsageMb: metrics.peakRamUsageMb,
+         tokensGenerated: metrics.tokensGenerated,
+         tokensPerSecond: metrics.tokensPerSecond,
+         promptTokensPerSecond: metrics.promptTokensPerSecond,
        ));
     });
   }
 
   @override
-  Stream<String> processText(List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext}) async* {
+  Stream<String> processText(List<ChatMessage> history, {required void Function(PipelineMetrics) onMetrics, String? systemContext, String? dynamicContext}) async* {
     if (!_isInitialized || _client == null) throw Exception('Pipeline not initialized');
     
     final startTime = DateTime.now();
@@ -138,8 +143,15 @@ class SttTextPipeline extends BasePipeline {
       {'role': 'system', 'content': systemContext ?? 'You are a helpful assistant.'},
     ];
     
-    for (final msg in history) {
+    final recentHistory = history.length > 6 ? history.sublist(history.length - 6) : history;
+    for (int i = 0; i < recentHistory.length; i++) {
+      final msg = recentHistory[i];
       if (msg.text.trim().isEmpty) continue;
+      
+      if (i == recentHistory.length - 1 && dynamicContext != null && dynamicContext.isNotEmpty) {
+        messages.add({'role': 'system', 'content': dynamicContext});
+      }
+      
       final role = msg.isUser ? 'user' : 'assistant';
       if (messages.last['role'] == role) {
         messages.last['content'] = '${messages.last['content']}\n\n${msg.text}';
@@ -153,24 +165,31 @@ class SttTextPipeline extends BasePipeline {
     double? tokensPerSecond;
     double? promptTokensPerSecond;
     
+    final profiler = HardwareProfiler();
+    profiler.startTracking();
+    
     try {
       final response = await _client!.createChatCompletion(
         model: 'default',
         messages: messages,
       );
       
-      timeToFirstTokenMs = DateTime.now().difference(startTime).inMilliseconds;
+      final totalTimeMs = DateTime.now().difference(startTime).inMilliseconds;
+      timeToFirstTokenMs = totalTimeMs; // Approximated since it's blocking
       
-      if (response.containsKey('timings')) {
-         final timings = response['timings'] as Map;
-         if (timings['predicted_per_second'] != null) {
-            tokensPerSecond = (timings['predicted_per_second'] as num).toDouble();
+      if (response.containsKey('usage') && response['usage'] != null) {
+         final usage = response['usage'] as Map;
+         if (usage['completion_tokens'] != null && usage['completion_tokens'] > 0) {
+            tokensGenerated = (usage['completion_tokens'] as num).toInt();
+            if (totalTimeMs > 0) {
+               tokensPerSecond = tokensGenerated! / (totalTimeMs / 1000.0);
+            }
          }
-         if (timings['prompt_per_second'] != null) {
-            promptTokensPerSecond = (timings['prompt_per_second'] as num).toDouble();
-         }
-         if (timings['predicted_n'] != null) {
-            tokensGenerated = (timings['predicted_n'] as num).toInt();
+         if (usage['prompt_tokens'] != null && usage['prompt_tokens'] > 0) {
+             final promptTokens = (usage['prompt_tokens'] as num).toInt();
+             if (totalTimeMs > 0) {
+                 promptTokensPerSecond = promptTokens / (totalTimeMs / 1000.0);
+             }
          }
       }
       
@@ -181,29 +200,48 @@ class SttTextPipeline extends BasePipeline {
          return;
       }
       
+      String generatedText = '';
       final choices = response['choices'] as List?;
       if (choices != null && choices.isNotEmpty) {
          final choice = choices[0] as Map;
          final messageObj = choice['message'];
          if (messageObj is Map && messageObj['content'] != null) {
-            yield messageObj['content'] as String;
+            generatedText = messageObj['content'] as String;
          } else if (choice['text'] != null) {
-            yield choice['text'] as String;
+            generatedText = choice['text'] as String;
          } else {
-            yield ' [Raw: $response] ';
+            generatedText = ' [Raw: $response] ';
          }
+         yield generatedText;
       } else {
          yield 'Error: Empty response generated.';
+      }
+      
+      if (tokensGenerated == null && generatedText.isNotEmpty) {
+         tokensGenerated = generatedText.length ~/ 4;
+         if (totalTimeMs > 0) {
+            tokensPerSecond = tokensGenerated! / (totalTimeMs / 1000.0);
+         }
+      }
+      
+      if (promptTokensPerSecond == null) {
+         int promptLength = messages.fold(0, (sum, m) => sum + (m['content']?.toString().length ?? 0));
+         int promptTokens = promptLength ~/ 4;
+         if (timeToFirstTokenMs > 0) {
+            promptTokensPerSecond = promptTokens / (timeToFirstTokenMs / 1000.0);
+         }
       }
     } catch (e) {
       yield "Error during generation: $e";
     }
     
+    final hwMetrics = profiler.stopTracking();
+
     onMetrics(PipelineMetrics(
       timeToFirstTokenMs: timeToFirstTokenMs,
       totalProcessingTimeMs: DateTime.now().difference(startTime).inMilliseconds,
-      peakCpuUsage: 50.0, 
-      peakRamUsageMb: 2400.0,
+      peakCpuUsage: hwMetrics['peakCpu'] ?? 0.0, 
+      peakRamUsageMb: hwMetrics['peakRamMb'] ?? 0.0,
       tokensGenerated: tokensGenerated,
       tokensPerSecond: tokensPerSecond,
       promptTokensPerSecond: promptTokensPerSecond,

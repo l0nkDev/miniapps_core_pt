@@ -20,14 +20,6 @@ class SettingsScreen extends StatelessWidget {
           const Text('Active Architecture', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           // ignore: deprecated_member_use
           RadioListTile<PipelineType>(
-            title: const Text('True Multimodal (Audio-in LLM)'),
-            subtitle: const Text('Requires base model + mmproj'),
-            value: PipelineType.trueMultimodal,
-            groupValue: state.activePipeline,
-            onChanged: (v) => state.setActivePipeline(v!),
-          ),
-          // ignore: deprecated_member_use
-          RadioListTile<PipelineType>(
             title: const Text('STT + Text LLM Pipeline'),
             subtitle: const Text('Requires Whisper model + base model'),
             value: PipelineType.sttPipeline,
@@ -40,17 +32,38 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 16),
           const Text('Text SLMs', style: TextStyle(fontWeight: FontWeight.bold)),
           _PresetDownloader(
-            name: 'Phi-3 Mini (Text LLM)',
-            url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-            filename: 'phi-3-mini-q4.gguf',
-            isSelected: state.selectedLlmPath?.endsWith('phi-3-mini-q4.gguf') ?? false,
+            name: 'Gemma 4 E4B IT (Text LLM)',
+            url: 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf',
+            filename: 'gemma-4-e4b-it-q4_k_m.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('gemma-4-e4b-it-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
           ),
           _PresetDownloader(
-            name: 'Gemma 2 2B IT (Text LLM)',
+            name: 'Gemma 4 E2B IT (Text LLM)',
             url: 'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf',
-            filename: 'gemma-2-2b-it-Q4_K_M.gguf',
-            isSelected: state.selectedLlmPath?.endsWith('gemma-2-2b-it-Q4_K_M.gguf') ?? false,
+            filename: 'gemma-4-e2b-it-q4_k_m.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('gemma-4-e2b-it-q4_k_m.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Qwen 3 4B Instruct (Text LLM)',
+            url: 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
+            filename: 'qwen3-4b-instruct-q4_k_m.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('qwen3-4b-instruct-q4_k_m.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Qwen 3 1.7B Instruct (Text LLM)',
+            url: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+            filename: 'qwen3-1.7b-instruct-q4_k_m.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('qwen3-1.7b-instruct-q4_k_m.gguf') ?? false,
+            onDownloaded: (path) => state.setModelPaths(llmPath: path),
+          ),
+          _PresetDownloader(
+            name: 'Qwen 2.5 3B Instruct (Text LLM)',
+            url: 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
+            filename: 'qwen2.5-3b-instruct-q4_k_m.gguf',
+            isSelected: state.selectedLlmPath?.endsWith('qwen2.5-3b-instruct-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
           ),
           _PresetDownloader(
@@ -60,50 +73,7 @@ class SettingsScreen extends StatelessWidget {
             isSelected: state.selectedLlmPath?.endsWith('qwen2.5-1.5b-instruct-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
           ),
-          _PresetDownloader(
-            name: 'TinyLlama 1.1B Chat (Text LLM)',
-            url: 'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
-            filename: 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
-            isSelected: state.selectedLlmPath?.endsWith('tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf') ?? false,
-            onDownloaded: (path) => state.setModelPaths(llmPath: path),
-          ),
-          _PresetDownloader(
-            name: 'DeepSeek R1 Distill 1.5B (Text LLM)',
-            url: 'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf',
-            filename: 'deepseek-r1-distill-qwen-1.5b-q4.gguf',
-            isSelected: state.selectedLlmPath?.endsWith('deepseek-r1-distill-qwen-1.5b-q4.gguf') ?? false,
-            onDownloaded: (path) => state.setModelPaths(llmPath: path),
-          ),
           const SizedBox(height: 8),
-          const Text('Multimodal SLMs (Requires Projector)', style: TextStyle(fontWeight: FontWeight.bold)),
-          _PresetDownloader(
-            name: 'LLaVA 1.5 7B (Base GGUF)',
-            url: 'https://huggingface.co/mys/ggml_llava-v1.5-7b/resolve/main/ggml-model-q4_k.gguf',
-            filename: 'llava-v1.5-7b-q4.gguf',
-            isSelected: state.selectedLlmPath?.endsWith('llava-v1.5-7b-q4.gguf') ?? false,
-            onDownloaded: (path) => state.setModelPaths(llmPath: path),
-          ),
-          _PresetDownloader(
-            name: 'LLaVA 1.5 Projector (mmproj)',
-            url: 'https://huggingface.co/mys/ggml_llava-v1.5-7b/resolve/main/mmproj-model-f16.gguf',
-            filename: 'llava-mmproj-f16.gguf',
-            isSelected: state.selectedProjectorPath?.endsWith('llava-mmproj-f16.gguf') ?? false,
-            onDownloaded: (path) => state.setModelPaths(projectorPath: path),
-          ),
-          _PresetDownloader(
-            name: 'Moondream 2 Base (Multimodal LLM)',
-            url: 'https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-text-model-f16.gguf',
-            filename: 'moondream2-text-model-f16.gguf',
-            isSelected: state.selectedLlmPath?.endsWith('moondream2-text-model-f16.gguf') ?? false,
-            onDownloaded: (path) => state.setModelPaths(llmPath: path),
-          ),
-          _PresetDownloader(
-            name: 'Moondream 2 Projector (mmproj)',
-            url: 'https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-mmproj-f16.gguf',
-            filename: 'moondream2-mmproj-f16.gguf',
-            isSelected: state.selectedProjectorPath?.endsWith('moondream2-mmproj-f16.gguf') ?? false,
-            onDownloaded: (path) => state.setModelPaths(projectorPath: path),
-          ),
           const SizedBox(height: 8),
           const Text('Speech-To-Text Models (Multilingual/Spanish)', style: TextStyle(fontWeight: FontWeight.bold)),
           _PresetDownloader(
@@ -278,20 +248,24 @@ class _PresetDownloaderState extends State<_PresetDownloader> {
     );
 
     if (path != null) {
-      setState(() {
-        _isDownloading = false;
-        _isDownloaded = true;
-        _progress = 1.0;
-        _downloadedPath = path;
-      });
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _isDownloaded = true;
+          _progress = 1.0;
+          _downloadedPath = path;
+        });
+      }
       widget.onDownloaded(path);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${widget.name} selected!')));
       }
     } else {
-      setState(() {
-        _isDownloading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed')));
       }
