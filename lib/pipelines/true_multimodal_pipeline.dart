@@ -14,7 +14,7 @@ class LocalLlamaCppPlatform extends LibLlamaCppPlatform {
   }) async {
     return LlamaCppLibraryDescriptor(
       resolution: LlamaCppLibraryResolution.path,
-      path: Platform.isLinux ? 'liblib_llama_cpp_linux.so' : (Platform.isAndroid ? 'liblib_llama_cpp_android.so' : null),
+      path: Platform.isWindows ? 'lib_llama_cpp_windows.dll' : (Platform.isLinux ? 'liblib_llama_cpp_linux.so' : (Platform.isAndroid ? 'liblib_llama_cpp_android.so' : null)),
     );
   }
 }

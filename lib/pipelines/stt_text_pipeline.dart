@@ -66,7 +66,7 @@ class SttTextPipeline extends BasePipeline {
         _llamaServerIsolate,
         _ServerArgs(
           config.llmModelPath,
-          Platform.isLinux ? 'liblib_llama_cpp_linux.so' : (Platform.isAndroid ? 'liblib_llama_cpp_android.so' : null),
+          Platform.isWindows ? 'lib_llama_cpp_windows.dll' : (Platform.isLinux ? 'liblib_llama_cpp_linux.so' : (Platform.isAndroid ? 'liblib_llama_cpp_android.so' : null)),
           receivePort.sendPort,
         ),
         onError: errorPort.sendPort,
