@@ -36,6 +36,7 @@ class ChatMessage {
 
 class PipelineMetrics {
   final String? modelName;
+  final int? sttProcessingTimeMs;
   final int timeToFirstTokenMs;
   final int totalProcessingTimeMs;
   final double peakCpuUsage;
@@ -46,6 +47,7 @@ class PipelineMetrics {
 
   PipelineMetrics({
     this.modelName,
+    this.sttProcessingTimeMs,
     required this.timeToFirstTokenMs,
     required this.totalProcessingTimeMs,
     required this.peakCpuUsage,

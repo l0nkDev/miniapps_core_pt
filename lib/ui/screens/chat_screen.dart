@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import '../../core/providers/app_state.dart';
 import '../../core/models/app_models.dart';
 import '../widgets/metrics_panel.dart';
@@ -22,6 +24,53 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final _audioRecorder = AudioRecorder();
   bool _isRecording = false;
+
+  final _speechToText = SpeechToText();
+  final _flutterTts = FlutterTts();
+  bool _speechEnabled = false;
+
+  String? _sttLocaleId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  void _initSpeech() async {
+    _speechEnabled = await _speechToText.initialize(
+      onStatus: (status) {
+        if ((status == 'notListening' || status == 'done') && _isRecording) {
+          if (mounted) setState(() => _isRecording = false);
+        }
+      },
+      onError: (error) {
+        if (mounted) setState(() => _isRecording = false);
+      },
+    );
+    
+    // Configure Spanish TTS
+    await _flutterTts.setLanguage("es-ES");
+    final dynamic isInstalled = await _flutterTts.isLanguageInstalled("es-ES");
+    if (isInstalled != true && isInstalled != 1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ Spanish TTS pack missing! Please download it in Android settings.')));
+      }
+    }
+    
+    // Configure Spanish STT
+    if (_speechEnabled) {
+      try {
+        var locales = await _speechToText.locales();
+        for (var locale in locales) {
+          if (locale.localeId.toLowerCase().startsWith('es')) {
+            _sttLocaleId = locale.localeId;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+  }
 
   Future<void> _showModelSwapPopup() async {
     final state = context.read<AppState>();
@@ -342,6 +391,14 @@ class _ChatScreenState extends State<ChatScreen> {
           }
           // Parse response for any transaction commands
           state.parseMessageForTransaction(currentResponse);
+          
+          if (state.useNativeTTS) {
+             // Strip tags and bracketed commands to avoid saying them out loud
+             String cleanText = currentResponse.replaceAll(RegExp(r'\[.*?\]|\(.*?\)|<.*?>'), '').trim();
+             if (cleanText.isNotEmpty) {
+               _flutterTts.speak(cleanText);
+             }
+          }
         }
         _scrollToBottom();
       },
@@ -371,6 +428,29 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Load pipeline first!')));
+      return;
+    }
+
+    if (state.useNativeSTT) {
+      if (_isRecording) {
+        _speechToText.stop();
+        setState(() => _isRecording = false);
+      } else {
+        if (_speechEnabled) {
+          setState(() => _isRecording = true);
+          _speechToText.listen(
+            localeId: _sttLocaleId ?? 'es_ES',
+            onResult: (result) {
+              if (result.finalResult) {
+                setState(() => _isRecording = false);
+                _sendMessage(result.recognizedWords);
+              }
+            },
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Native STT not available or permission denied')));
+        }
+      }
       return;
     }
 

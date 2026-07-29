@@ -33,28 +33,28 @@ class SettingsScreen extends StatelessWidget {
           const Text('Text SLMs', style: TextStyle(fontWeight: FontWeight.bold)),
           _PresetDownloader(
             name: 'Gemma 4 E4B IT (Text LLM)',
-            url: 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf',
+            url: 'https://huggingface.co/bartowski/gemma-4-e4b-it-GGUF/resolve/main/gemma-4-e4b-it-q4_k_m.gguf',
             filename: 'gemma-4-e4b-it-q4_k_m.gguf',
             isSelected: state.selectedLlmPath?.endsWith('gemma-4-e4b-it-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
           ),
           _PresetDownloader(
             name: 'Gemma 4 E2B IT (Text LLM)',
-            url: 'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf',
+            url: 'https://huggingface.co/bartowski/gemma-4-e2b-it-GGUF/resolve/main/gemma-4-e2b-it-q4_k_m.gguf',
             filename: 'gemma-4-e2b-it-q4_k_m.gguf',
             isSelected: state.selectedLlmPath?.endsWith('gemma-4-e2b-it-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
           ),
           _PresetDownloader(
             name: 'Qwen 3 4B Instruct (Text LLM)',
-            url: 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
+            url: 'https://huggingface.co/Qwen/Qwen3-4B-Instruct-GGUF/resolve/main/qwen3-4b-instruct-q4_k_m.gguf',
             filename: 'qwen3-4b-instruct-q4_k_m.gguf',
             isSelected: state.selectedLlmPath?.endsWith('qwen3-4b-instruct-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
           ),
           _PresetDownloader(
             name: 'Qwen 3 1.7B Instruct (Text LLM)',
-            url: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+            url: 'https://huggingface.co/Qwen/Qwen3-1.7B-Instruct-GGUF/resolve/main/qwen3-1.7b-instruct-q4_k_m.gguf',
             filename: 'qwen3-1.7b-instruct-q4_k_m.gguf',
             isSelected: state.selectedLlmPath?.endsWith('qwen3-1.7b-instruct-q4_k_m.gguf') ?? false,
             onDownloaded: (path) => state.setModelPaths(llmPath: path),
@@ -148,6 +148,21 @@ class SettingsScreen extends StatelessWidget {
             onChanged: (value) {
               state.setModelPaths(gpuLayers: value.toInt());
             },
+          ),
+          const SizedBox(height: 16),
+          const Divider(),
+          const Text('Native Voice Engine', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          SwitchListTile(
+            title: const Text('Use Native Speech-to-Text'),
+            subtitle: const Text('Instantly transcribe audio using your device\'s native engine. Bypasses Whisper. Requires offline language pack.'),
+            value: state.useNativeSTT,
+            onChanged: (val) => state.setNativeToggles(stt: val),
+          ),
+          SwitchListTile(
+            title: const Text('Use Native Text-to-Speech'),
+            subtitle: const Text('Read AI responses out loud automatically. Requires offline language pack.'),
+            value: state.useNativeTTS,
+            onChanged: (val) => state.setNativeToggles(tts: val),
           ),
           const SizedBox(height: 16),
           SizedBox(

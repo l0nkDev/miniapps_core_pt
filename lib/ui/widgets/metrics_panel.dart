@@ -49,10 +49,12 @@ class MetricsPanel extends StatelessWidget {
                 runSpacing: 4,
                 alignment: WrapAlignment.spaceBetween,
                 children: [
+                  if (latestMetrics.sttProcessingTimeMs != null && latestMetrics.sttProcessingTimeMs! > 0)
+                     _StatText('STT Time: ${latestMetrics.sttProcessingTimeMs}ms'),
                   _StatText('TTFT: ${latestMetrics.timeToFirstTokenMs}ms'),
-                  _StatText('TPS: ${latestMetrics.tokensPerSecond}'),
+                  _StatText('Decoding TPS: ${latestMetrics.tokensPerSecond?.toStringAsFixed(1) ?? "0.0"}'),
                   _StatText('Total: ${latestMetrics.totalProcessingTimeMs}ms'),
-                  _StatText('Peak RAM: ${latestMetrics.peakRamUsageMb}MB'),
+                  _StatText('Peak RAM: ${latestMetrics.peakRamUsageMb.toStringAsFixed(1)}MB'),
                 ],
               )
             else

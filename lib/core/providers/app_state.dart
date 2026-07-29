@@ -17,6 +17,12 @@ class AppState extends ChangeNotifier {
   String? _selectedProjectorPath;
   String? _selectedSttPath;
   int _gpuLayers = 99;
+  
+  bool _useNativeSTT = false;
+  bool get useNativeSTT => _useNativeSTT;
+  
+  bool _useNativeTTS = false;
+  bool get useNativeTTS => _useNativeTTS;
 
   final List<ChatMessage> _messages = [];
   final Map<String, List<PipelineMetrics>> _benchmarkHistory = {};
@@ -67,6 +73,8 @@ class AppState extends ChangeNotifier {
         llm = data['llm'];
         stt = data['stt'];
         projector = data['projector'];
+        _useNativeSTT = data['useNativeSTT'] ?? false;
+        _useNativeTTS = data['useNativeTTS'] ?? false;
         
         // Verify they still exist on disk
         if (llm != null && !File(llm).existsSync()) llm = null;
@@ -341,6 +349,13 @@ class AppState extends ChangeNotifier {
     _saveModelPreferences();
   }
   
+  void setNativeToggles({bool? stt, bool? tts}) {
+    if (stt != null) _useNativeSTT = stt;
+    if (tts != null) _useNativeTTS = tts;
+    notifyListeners();
+    _saveModelPreferences();
+  }
+  
   Future<void> _saveModelPreferences() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -349,6 +364,8 @@ class AppState extends ChangeNotifier {
         'llm': _selectedLlmPath,
         'stt': _selectedSttPath,
         'projector': _selectedProjectorPath,
+        'useNativeSTT': _useNativeSTT,
+        'useNativeTTS': _useNativeTTS,
       }));
     } catch (e) {
       debugPrint('Failed to save model preferences: $e');

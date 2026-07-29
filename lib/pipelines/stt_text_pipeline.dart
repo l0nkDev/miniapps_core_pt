@@ -119,9 +119,12 @@ class SttTextPipeline extends BasePipeline {
        ChatMessage(id: 'audio', text: text, isUser: true, timestamp: DateTime.now())
     );
     
+    final sttTimeMs = DateTime.now().difference(startTime).inMilliseconds;
+
     yield* processText(newHistory, systemContext: systemContext, dynamicContext: dynamicContext, onMetrics: (metrics) {
        final totalTime = DateTime.now().difference(startTime).inMilliseconds;
        onMetrics(PipelineMetrics(
+         sttProcessingTimeMs: sttTimeMs,
          timeToFirstTokenMs: metrics.timeToFirstTokenMs,
          totalProcessingTimeMs: totalTime,
          peakCpuUsage: metrics.peakCpuUsage,
@@ -175,21 +178,29 @@ class SttTextPipeline extends BasePipeline {
       );
       
       final totalTimeMs = DateTime.now().difference(startTime).inMilliseconds;
-      timeToFirstTokenMs = totalTimeMs; // Approximated since it's blocking
+      
+      // Attempt to extract precise timings from llama.cpp server
+      if (response.containsKey('timings') && response['timings'] != null) {
+          final timings = response['timings'] as Map;
+          if (timings['prompt_ms'] != null) {
+              timeToFirstTokenMs = (timings['prompt_ms'] as num).toInt();
+          } else {
+              timeToFirstTokenMs = totalTimeMs;
+          }
+          if (timings['predicted_per_second'] != null) {
+              tokensPerSecond = (timings['predicted_per_second'] as num).toDouble();
+          }
+          if (timings['prompt_per_second'] != null) {
+              promptTokensPerSecond = (timings['prompt_per_second'] as num).toDouble();
+          }
+      } else {
+          timeToFirstTokenMs = totalTimeMs; // Fallback
+      }
       
       if (response.containsKey('usage') && response['usage'] != null) {
          final usage = response['usage'] as Map;
          if (usage['completion_tokens'] != null && usage['completion_tokens'] > 0) {
             tokensGenerated = (usage['completion_tokens'] as num).toInt();
-            if (totalTimeMs > 0) {
-               tokensPerSecond = tokensGenerated! / (totalTimeMs / 1000.0);
-            }
-         }
-         if (usage['prompt_tokens'] != null && usage['prompt_tokens'] > 0) {
-             final promptTokens = (usage['prompt_tokens'] as num).toInt();
-             if (totalTimeMs > 0) {
-                 promptTokensPerSecond = promptTokens / (totalTimeMs / 1000.0);
-             }
          }
       }
       
@@ -219,18 +230,16 @@ class SttTextPipeline extends BasePipeline {
       
       if (tokensGenerated == null && generatedText.isNotEmpty) {
          tokensGenerated = generatedText.length ~/ 4;
-         if (totalTimeMs > 0) {
-            tokensPerSecond = tokensGenerated! / (totalTimeMs / 1000.0);
+      }
+      
+      // Fallback calculation if timings object was missing
+      if (tokensPerSecond == null && tokensGenerated != null) {
+         final decodingTimeMs = totalTimeMs - timeToFirstTokenMs;
+         if (decodingTimeMs > 0) {
+             tokensPerSecond = tokensGenerated! / (decodingTimeMs / 1000.0);
          }
       }
       
-      if (promptTokensPerSecond == null) {
-         int promptLength = messages.fold(0, (sum, m) => sum + (m['content']?.toString().length ?? 0));
-         int promptTokens = promptLength ~/ 4;
-         if (timeToFirstTokenMs > 0) {
-            promptTokensPerSecond = promptTokens / (timeToFirstTokenMs / 1000.0);
-         }
-      }
     } catch (e) {
       yield "Error during generation: $e";
     }
